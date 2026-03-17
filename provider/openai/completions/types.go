@@ -1,4 +1,4 @@
-package openai
+package completions
 
 // --- Request types ---
 

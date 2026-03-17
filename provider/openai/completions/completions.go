@@ -1,8 +1,7 @@
-package openai
+package completions
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,34 +13,34 @@ import (
 
 const defaultBaseURL = "https://api.openai.com/v1"
 
-type OpenAICompletionsProvider struct {
+type Provider struct {
 	apiKey     string
 	baseURL    string
 	httpClient *http.Client
 }
 
-type OpenAICompletionsProviderOption func(*OpenAICompletionsProvider)
+type Option func(*Provider)
 
-func WithAPIKey(apiKey string) OpenAICompletionsProviderOption {
-	return func(p *OpenAICompletionsProvider) {
+func WithAPIKey(apiKey string) Option {
+	return func(p *Provider) {
 		p.apiKey = apiKey
 	}
 }
 
-func WithBaseURL(baseURL string) OpenAICompletionsProviderOption {
-	return func(p *OpenAICompletionsProvider) {
+func WithBaseURL(baseURL string) Option {
+	return func(p *Provider) {
 		p.baseURL = baseURL
 	}
 }
 
-func WithHTTPClient(client *http.Client) OpenAICompletionsProviderOption {
-	return func(p *OpenAICompletionsProvider) {
+func WithHTTPClient(client *http.Client) Option {
+	return func(p *Provider) {
 		p.httpClient = client
 	}
 }
 
-func NewCompletions(options ...OpenAICompletionsProviderOption) *OpenAICompletionsProvider {
-	provider := &OpenAICompletionsProvider{
+func New(options ...Option) *Provider {
+	provider := &Provider{
 		baseURL:    defaultBaseURL,
 		httpClient: &http.Client{},
 	}
@@ -51,16 +50,16 @@ func NewCompletions(options ...OpenAICompletionsProviderOption) *OpenAICompletio
 	return provider
 }
 
-func (p *OpenAICompletionsProvider) Name() string {
+func (p *Provider) Name() string {
 	return "openai-completions"
 }
 
-func (p *OpenAICompletionsProvider) GetModels() ([]sdk.Model, error) {
+func (p *Provider) GetModels() ([]sdk.Model, error) {
 	return nil, nil
 }
 
 // ChatModel creates a Model bound to this provider.
-func (p *OpenAICompletionsProvider) ChatModel(id string) *sdk.Model {
+func (p *Provider) ChatModel(id string) *sdk.Model {
 	return &sdk.Model{
 		ID:       id,
 		Provider: p,
@@ -70,7 +69,7 @@ func (p *OpenAICompletionsProvider) ChatModel(id string) *sdk.Model {
 
 // ---------- DoGenerate ----------
 
-func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
+func (p *Provider) DoGenerate(ctx context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("openai: model is required")
 	}
@@ -93,7 +92,7 @@ func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params sdk.G
 
 // ---------- buildRequest ----------
 
-func (p *OpenAICompletionsProvider) buildRequest(params sdk.GenerateParams) *chatRequest {
+func (p *Provider) buildRequest(params sdk.GenerateParams) *chatRequest {
 	req := &chatRequest{
 		Model:               params.Model.ID,
 		Messages:            convertMessages(params),
@@ -255,7 +254,7 @@ func convertContent(parts []sdk.MessagePart) any {
 
 // ---------- parseResponse ----------
 
-func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error) {
+func (p *Provider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error) {
 	result := &sdk.GenerateResult{
 		Usage: convertUsage(&resp.Usage),
 		Response: sdk.ResponseMetadata{
@@ -294,7 +293,7 @@ func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) (*sdk.Gene
 
 // ---------- DoStream ----------
 
-func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
+func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sdk.StreamResult, error) {
 	if params.Model == nil {
 		return nil, fmt.Errorf("openai: model is required")
 	}
@@ -528,12 +527,6 @@ func reasoningFromDelta(d chatChunkDelta) string {
 		return d.ReasoningContent
 	}
 	return d.Reasoning
-}
-
-func generateID() string {
-	b := make([]byte, 12)
-	rand.Read(b)
-	return fmt.Sprintf("call_%x", b)
 }
 
 func convertUsage(u *chatUsage) sdk.Usage {

@@ -1,4 +1,4 @@
-package openai_test
+package completions_test
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/memohai/twilight-ai/internal/testutil"
-	"github.com/memohai/twilight-ai/provider/openai"
+	"github.com/memohai/twilight-ai/provider/openai/completions"
 	"github.com/memohai/twilight-ai/sdk"
 )
 
@@ -52,9 +52,9 @@ func TestDoGenerate(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(
-		openai.WithAPIKey("test-key"),
-		openai.WithBaseURL(srv.URL),
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
 	)
 
 	model := &sdk.Model{ID: "gpt-4o-mini"}
@@ -106,9 +106,9 @@ func TestDoStream(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(
-		openai.WithAPIKey("test-key"),
-		openai.WithBaseURL(srv.URL),
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
 	)
 
 	model := &sdk.Model{ID: "gpt-4o-mini"}
@@ -206,9 +206,9 @@ func TestDoGenerate_WithImage(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(
-		openai.WithAPIKey("test-key"),
-		openai.WithBaseURL(srv.URL),
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
 	)
 
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
@@ -282,7 +282,7 @@ func TestDoGenerate_ToolCall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("test-key"), completions.WithBaseURL(srv.URL))
 
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: &sdk.Model{ID: "gpt-4o-mini"},
@@ -385,7 +385,7 @@ func TestDoGenerate_ToolCallMultiTurn(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("test-key"), completions.WithBaseURL(srv.URL))
 
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: &sdk.Model{ID: "gpt-4o-mini"},
@@ -445,7 +445,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("test-key"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("test-key"), completions.WithBaseURL(srv.URL))
 
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model: &sdk.Model{ID: "gpt-4o-mini"},
@@ -521,7 +521,7 @@ func TestDoStream_ToolCall(t *testing.T) {
 }
 
 func TestDoGenerate_NoModel(t *testing.T) {
-	p := openai.NewCompletions(openai.WithAPIKey("k"))
+	p := completions.New(completions.WithAPIKey("k"))
 	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{})
 	if err == nil {
 		t.Fatal("expected error for nil model")
@@ -529,7 +529,7 @@ func TestDoGenerate_NoModel(t *testing.T) {
 }
 
 func TestDoStream_NoModel(t *testing.T) {
-	p := openai.NewCompletions(openai.WithAPIKey("k"))
+	p := completions.New(completions.WithAPIKey("k"))
 	_, err := p.DoStream(context.Background(), sdk.GenerateParams{})
 	if err == nil {
 		t.Fatal("expected error for nil model")
@@ -557,7 +557,7 @@ func TestDoGenerate_ReasoningContent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "deepseek-r1"},
 		Messages: []sdk.Message{sdk.UserMessage("2+2?")},
@@ -592,7 +592,7 @@ func TestDoGenerate_ReasoningFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "gpt-oss"},
 		Messages: []sdk.Message{sdk.UserMessage("answer")},
@@ -625,7 +625,7 @@ func TestDoStream_ReasoningFallback(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "gpt-oss"},
 		Messages: []sdk.Message{sdk.UserMessage("hi")},
@@ -673,7 +673,7 @@ func TestDoStream_ReasoningClosedBeforeToolCall(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "deepseek-r1"},
 		Messages: []sdk.Message{sdk.UserMessage("search")},
@@ -725,7 +725,7 @@ func TestDoStream_FlushOnAbruptEnd(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "m"},
 		Messages: []sdk.Message{sdk.UserMessage("hi")},
@@ -796,7 +796,7 @@ func TestDoGenerate_AssistantReasoningInRequest(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
 		Model: &sdk.Model{ID: "m"},
 		Messages: []sdk.Message{
@@ -833,7 +833,7 @@ func TestDoStream_EarlyToolCallDetection(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	p := completions.New(completions.WithAPIKey("k"), completions.WithBaseURL(srv.URL))
 	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
 		Model:    &sdk.Model{ID: "m"},
 		Messages: []sdk.Message{sdk.UserMessage("time?")},
@@ -877,14 +877,14 @@ func envOrSkip(t *testing.T, key string) string {
 	return v
 }
 
-func newIntegrationProvider(t *testing.T) *openai.OpenAICompletionsProvider {
+func newIntegrationProvider(t *testing.T) *completions.Provider {
 	t.Helper()
 	apiKey := envOrSkip(t, "OPENAI_API_KEY")
-	opts := []openai.OpenAICompletionsProviderOption{openai.WithAPIKey(apiKey)}
+	opts := []completions.Option{completions.WithAPIKey(apiKey)}
 	if base := os.Getenv("OPENAI_BASE_URL"); base != "" {
-		opts = append(opts, openai.WithBaseURL(base))
+		opts = append(opts, completions.WithBaseURL(base))
 	}
-	return openai.NewCompletions(opts...)
+	return completions.New(opts...)
 }
 
 func integrationModel(t *testing.T) *sdk.Model {
@@ -945,6 +945,151 @@ func TestIntegration_DoStream(t *testing.T) {
 	if text == "" {
 		t.Error("expected non-empty streamed text")
 	}
+}
+
+// ---------- multi-model integration tests (OpenRouter) ----------
+
+func TestIntegration_MultiModel(t *testing.T) {
+	p := newIntegrationProvider(t)
+
+	models := []struct {
+		id          string
+		hasReasoning bool
+	}{
+		{"google/gemini-2.5-flash", false},
+		{"deepseek/deepseek-r1", true},
+		{"deepseek/deepseek-chat", false},
+	}
+
+	for _, m := range models {
+		t.Run(m.id, func(t *testing.T) {
+			model := &sdk.Model{ID: m.id}
+			result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+				Model: model,
+				Messages: []sdk.Message{sdk.UserMessage("What is 2+3? Answer with just the number.")},
+			})
+			if err != nil {
+				t.Fatalf("DoGenerate: %v", err)
+			}
+			t.Logf("text=%q reasoning=%q finish=%s tokens=in:%d/out:%d/reasoning:%d",
+				result.Text, truncate(result.Reasoning, 80), result.FinishReason,
+				result.Usage.InputTokens, result.Usage.OutputTokens, result.Usage.ReasoningTokens)
+
+			if result.Text == "" {
+				t.Error("expected non-empty text")
+			}
+			if m.hasReasoning && result.Reasoning == "" {
+				t.Error("expected non-empty reasoning for reasoning model")
+			}
+		})
+	}
+}
+
+func TestIntegration_MultiModel_Stream(t *testing.T) {
+	p := newIntegrationProvider(t)
+
+	models := []struct {
+		id           string
+		hasReasoning bool
+	}{
+		{"google/gemini-2.5-flash", false},
+		{"deepseek/deepseek-r1", true},
+	}
+
+	for _, m := range models {
+		t.Run(m.id, func(t *testing.T) {
+			model := &sdk.Model{ID: m.id}
+			sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+				Model:    model,
+				Messages: []sdk.Message{sdk.UserMessage("What is 2+3? Answer with just the number.")},
+			})
+			if err != nil {
+				t.Fatalf("DoStream: %v", err)
+			}
+
+			var text, reasoning string
+			var gotReasoningStart, gotReasoningEnd bool
+			for part := range sr.Stream {
+				switch p := part.(type) {
+				case *sdk.ReasoningStartPart:
+					gotReasoningStart = true
+				case *sdk.ReasoningDeltaPart:
+					reasoning += p.Text
+				case *sdk.ReasoningEndPart:
+					gotReasoningEnd = true
+				case *sdk.TextDeltaPart:
+					text += p.Text
+				case *sdk.ErrorPart:
+					t.Fatalf("stream error: %v", p.Error)
+				case *sdk.FinishPart:
+					t.Logf("finish=%s", p.FinishReason)
+				}
+			}
+			t.Logf("text=%q reasoning=%q (len=%d)", text, truncate(reasoning, 80), len(reasoning))
+
+			if text == "" {
+				t.Error("expected non-empty text")
+			}
+			if m.hasReasoning {
+				if reasoning == "" {
+					t.Error("expected non-empty reasoning")
+				}
+				if !gotReasoningStart {
+					t.Error("missing ReasoningStartPart")
+				}
+				if !gotReasoningEnd {
+					t.Error("missing ReasoningEndPart")
+				}
+			}
+		})
+	}
+}
+
+func TestIntegration_Reasoning_ToolCall(t *testing.T) {
+	p := newIntegrationProvider(t)
+	model := &sdk.Model{ID: "deepseek/deepseek-r1"}
+
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    model,
+		Messages: []sdk.Message{sdk.UserMessage("What's the weather in Tokyo right now?")},
+		Tools: []sdk.Tool{{
+			Name:        "get_weather",
+			Description: "Get the current weather for a city",
+			Parameters: &jsonschema.Schema{
+				Type: "object",
+				Properties: map[string]*jsonschema.Schema{
+					"city": {Type: "string", Description: "City name"},
+				},
+				Required: []string{"city"},
+			},
+		}},
+		ToolChoice: "auto",
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+
+	t.Logf("text=%q reasoning=%q (len=%d) finish=%s toolCalls=%d",
+		truncate(result.Text, 80), truncate(result.Reasoning, 80),
+		len(result.Reasoning), result.FinishReason, len(result.ToolCalls))
+
+	if result.Reasoning == "" {
+		t.Log("warning: no reasoning returned (model may not emit reasoning with tool calls)")
+	}
+	if len(result.ToolCalls) > 0 {
+		for _, tc := range result.ToolCalls {
+			t.Logf("  tool=%q id=%s input=%v", tc.ToolName, tc.ToolCallID, tc.Input)
+		}
+	} else if result.Text == "" {
+		t.Error("expected either tool calls or text response")
+	}
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen] + "..."
 }
 
 func TestMain(m *testing.M) {
