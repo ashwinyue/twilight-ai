@@ -41,10 +41,11 @@ type chatFunction struct {
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          any            `json:"content"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
 
 type chatContentPartText struct {
@@ -83,6 +84,7 @@ type chatRespMessage struct {
 	Role             string         `json:"role"`
 	Content          string         `json:"content"`
 	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Reasoning        string         `json:"reasoning,omitempty"`
 	Refusal          string         `json:"refusal,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 }
@@ -136,6 +138,7 @@ type chatChunkDelta struct {
 	Role             string              `json:"role,omitempty"`
 	Content          string              `json:"content,omitempty"`
 	ReasoningContent string              `json:"reasoning_content,omitempty"`
+	Reasoning        string              `json:"reasoning,omitempty"`
 	Refusal          string              `json:"refusal,omitempty"`
 	ToolCalls        []chatToolCallChunk `json:"tool_calls,omitempty"`
 }

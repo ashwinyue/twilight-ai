@@ -2,6 +2,7 @@ package openai
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -87,7 +88,7 @@ func (p *OpenAICompletionsProvider) DoGenerate(ctx context.Context, params sdk.G
 		return nil, fmt.Errorf("openai: chat completions request failed: %w", err)
 	}
 
-	return p.parseResponse(resp), nil
+	return p.parseResponse(resp)
 }
 
 // ---------- buildRequest ----------
@@ -172,19 +173,29 @@ func convertAssistantMessage(msg sdk.Message) chatMessage {
 
 	var contentParts []sdk.MessagePart
 	var toolCalls []chatToolCall
+	var reasoning string
 
 	for _, part := range msg.Content {
 		switch p := part.(type) {
 		case sdk.ToolCallPart:
-			args, _ := json.Marshal(p.Input)
+			args, err := json.Marshal(p.Input)
+			if err != nil {
+				continue
+			}
+			id := p.ToolCallID
+			if id == "" {
+				id = generateID()
+			}
 			toolCalls = append(toolCalls, chatToolCall{
-				ID:   p.ToolCallID,
+				ID:   id,
 				Type: "function",
 				Function: chatFunctionCall{
 					Name:      p.ToolName,
 					Arguments: string(args),
 				},
 			})
+		case sdk.ReasoningPart:
+			reasoning += p.Text
 		default:
 			contentParts = append(contentParts, part)
 		}
@@ -192,6 +203,9 @@ func convertAssistantMessage(msg sdk.Message) chatMessage {
 
 	if len(contentParts) > 0 {
 		cm.Content = convertContent(contentParts)
+	}
+	if reasoning != "" {
+		cm.ReasoningContent = reasoning
 	}
 	if len(toolCalls) > 0 {
 		cm.ToolCalls = toolCalls
@@ -227,8 +241,6 @@ func convertContent(parts []sdk.MessagePart) any {
 		switch p := part.(type) {
 		case sdk.TextPart:
 			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
-		case sdk.ReasoningPart:
-			out = append(out, chatContentPartText{Type: "text", Text: p.Text})
 		case sdk.ImagePart:
 			out = append(out, chatContentPartImage{
 				Type:     "image_url",
@@ -243,7 +255,7 @@ func convertContent(parts []sdk.MessagePart) any {
 
 // ---------- parseResponse ----------
 
-func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *sdk.GenerateResult {
+func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) (*sdk.GenerateResult, error) {
 	result := &sdk.GenerateResult{
 		Usage: convertUsage(&resp.Usage),
 		Response: sdk.ResponseMetadata{
@@ -256,22 +268,28 @@ func (p *OpenAICompletionsProvider) parseResponse(resp *chatResponse) *sdk.Gener
 	if len(resp.Choices) > 0 {
 		choice := resp.Choices[0]
 		result.Text = choice.Message.Content
-		result.Reasoning = choice.Message.ReasoningContent
+		result.Reasoning = reasoningFromMessage(choice.Message)
 		result.FinishReason = mapFinishReason(choice.FinishReason)
 		result.RawFinishReason = choice.FinishReason
 
 		for _, tc := range choice.Message.ToolCalls {
 			var input any
-			json.Unmarshal([]byte(tc.Function.Arguments), &input)
+			if err := json.Unmarshal([]byte(tc.Function.Arguments), &input); err != nil {
+				return result, fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", tc.Function.Name, err)
+			}
+			id := tc.ID
+			if id == "" {
+				id = generateID()
+			}
 			result.ToolCalls = append(result.ToolCalls, sdk.ToolCall{
-				ToolCallID: tc.ID,
+				ToolCallID: id,
 				ToolName:   tc.Function.Name,
 				Input:      input,
 			})
 		}
 	}
 
-	return result
+	return result, nil
 }
 
 // ---------- DoStream ----------
@@ -299,6 +317,7 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 			chunkID            string
 			chunkModel         string
 			chunkCreated       int64
+			flushed            bool
 			pendingToolCalls   = map[int]*streamingToolCall{}
 		)
 
@@ -308,6 +327,37 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 				return true
 			case <-ctx.Done():
 				return false
+			}
+		}
+
+		flush := func() {
+			if flushed {
+				return
+			}
+			flushed = true
+			if reasoningStartSent {
+				send(&sdk.ReasoningEndPart{ID: chunkID})
+				reasoningStartSent = false
+			}
+			if textStartSent {
+				send(&sdk.TextEndPart{ID: chunkID})
+				textStartSent = false
+			}
+			for _, stc := range pendingToolCalls {
+				if stc.finished {
+					continue
+				}
+				send(&sdk.ToolInputEndPart{ID: stc.id})
+				var input any
+				if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
+					send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", stc.name, err)})
+				}
+				send(&sdk.StreamToolCallPart{
+					ToolCallID: stc.id,
+					ToolName:   stc.name,
+					Input:      input,
+				})
+				stc.finished = true
 			}
 		}
 
@@ -350,16 +400,15 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 			}
 			choice := chunk.Choices[0]
 
-			// reasoning content (e.g. DeepSeek, o1-compatible providers)
-			if choice.Delta.ReasoningContent != "" {
+			reasoningContent := reasoningFromDelta(choice.Delta)
+			if reasoningContent != "" {
 				if !reasoningStartSent {
 					send(&sdk.ReasoningStartPart{ID: chunk.ID})
 					reasoningStartSent = true
 				}
-				send(&sdk.ReasoningDeltaPart{ID: chunk.ID, Text: choice.Delta.ReasoningContent})
+				send(&sdk.ReasoningDeltaPart{ID: chunk.ID, Text: reasoningContent})
 			}
 
-			// text content
 			if choice.Delta.Content != "" {
 				if reasoningStartSent {
 					send(&sdk.ReasoningEndPart{ID: chunk.ID})
@@ -372,17 +421,30 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 				send(&sdk.TextDeltaPart{ID: chunk.ID, Text: choice.Delta.Content})
 			}
 
-			// tool call deltas
+			if len(choice.Delta.ToolCalls) > 0 {
+				if reasoningStartSent {
+					send(&sdk.ReasoningEndPart{ID: chunk.ID})
+					reasoningStartSent = false
+				}
+				if textStartSent {
+					send(&sdk.TextEndPart{ID: chunk.ID})
+					textStartSent = false
+				}
+			}
+
 			for _, tc := range choice.Delta.ToolCalls {
-				stc, exists := pendingToolCalls[tc.Index]
+				idx := tc.Index
+				stc, exists := pendingToolCalls[idx]
 				if !exists {
-					stc = &streamingToolCall{}
-					pendingToolCalls[tc.Index] = stc
-					stc.id = tc.ID
-					stc.name = tc.Function.Name
+					id := tc.ID
+					if id == "" {
+						id = generateID()
+					}
+					stc = &streamingToolCall{id: id, name: tc.Function.Name}
+					pendingToolCalls[idx] = stc
 					send(&sdk.ToolInputStartPart{
-						ID:       tc.ID,
-						ToolName: tc.Function.Name,
+						ID:       stc.id,
+						ToolName: stc.name,
 					})
 				}
 				if tc.Function.Arguments != "" {
@@ -391,31 +453,28 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 						ID:    stc.id,
 						Delta: tc.Function.Arguments,
 					})
+
+					if !stc.finished && json.Valid([]byte(stc.args)) {
+						send(&sdk.ToolInputEndPart{ID: stc.id})
+						var input any
+						if err := json.Unmarshal([]byte(stc.args), &input); err != nil {
+							send(&sdk.ErrorPart{Error: fmt.Errorf("openai: unmarshal tool call arguments for %q: %w", stc.name, err)})
+						}
+						send(&sdk.StreamToolCallPart{
+							ToolCallID: stc.id,
+							ToolName:   stc.name,
+							Input:      input,
+						})
+						stc.finished = true
+					}
 				}
 			}
 
-			// finish
 			if choice.FinishReason != nil && *choice.FinishReason != "" {
 				rawFinishReason = *choice.FinishReason
 				finishReason = mapFinishReason(rawFinishReason)
 
-				if reasoningStartSent {
-					send(&sdk.ReasoningEndPart{ID: chunk.ID})
-				}
-				if textStartSent {
-					send(&sdk.TextEndPart{ID: chunk.ID})
-				}
-
-				for _, stc := range pendingToolCalls {
-					send(&sdk.ToolInputEndPart{ID: stc.id})
-					var input any
-					json.Unmarshal([]byte(stc.args), &input)
-					send(&sdk.StreamToolCallPart{
-						ToolCallID: stc.id,
-						ToolName:   stc.name,
-						Input:      input,
-					})
-				}
+				flush()
 
 				send(&sdk.FinishStepPart{
 					FinishReason:    finishReason,
@@ -436,6 +495,8 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 			send(&sdk.ErrorPart{Error: fmt.Errorf("openai: stream failed: %w", err)})
 		}
 
+		flush()
+
 		send(&sdk.FinishPart{
 			FinishReason:    finishReason,
 			RawFinishReason: rawFinishReason,
@@ -447,12 +508,33 @@ func (p *OpenAICompletionsProvider) DoStream(ctx context.Context, params sdk.Gen
 }
 
 type streamingToolCall struct {
-	id   string
-	name string
-	args string
+	id       string
+	name     string
+	args     string
+	finished bool
 }
 
 // ---------- helpers ----------
+
+func reasoningFromMessage(m chatRespMessage) string {
+	if m.ReasoningContent != "" {
+		return m.ReasoningContent
+	}
+	return m.Reasoning
+}
+
+func reasoningFromDelta(d chatChunkDelta) string {
+	if d.ReasoningContent != "" {
+		return d.ReasoningContent
+	}
+	return d.Reasoning
+}
+
+func generateID() string {
+	b := make([]byte, 12)
+	rand.Read(b)
+	return fmt.Sprintf("call_%x", b)
+}
 
 func convertUsage(u *chatUsage) sdk.Usage {
 	usage := sdk.Usage{

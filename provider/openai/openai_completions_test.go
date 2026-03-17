@@ -536,6 +536,336 @@ func TestDoStream_NoModel(t *testing.T) {
 	}
 }
 
+// ---------- reasoning tests ----------
+
+func TestDoGenerate_ReasoningContent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-r", "model": "deepseek-r1",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":              "assistant",
+					"content":           "The answer is 4.",
+					"reasoning_content": "Let me think... 2+2=4",
+				},
+			}},
+			"usage": map[string]any{"prompt_tokens": 5, "completion_tokens": 10, "total_tokens": 15},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "deepseek-r1"},
+		Messages: []sdk.Message{sdk.UserMessage("2+2?")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Text != "The answer is 4." {
+		t.Errorf("text: got %q", result.Text)
+	}
+	if result.Reasoning != "Let me think... 2+2=4" {
+		t.Errorf("reasoning: got %q", result.Reasoning)
+	}
+}
+
+func TestDoGenerate_ReasoningFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-rf", "model": "gpt-oss",
+			"choices": []map[string]any{{
+				"index":         0,
+				"finish_reason": "stop",
+				"message": map[string]any{
+					"role":      "assistant",
+					"content":   "42",
+					"reasoning": "Thinking via reasoning field...",
+				},
+			}},
+			"usage": map[string]any{"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	result, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "gpt-oss"},
+		Messages: []sdk.Message{sdk.UserMessage("answer")},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+	if result.Reasoning != "Thinking via reasoning field..." {
+		t.Errorf("reasoning fallback: got %q", result.Reasoning)
+	}
+}
+
+func TestDoStream_ReasoningFallback(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []string{
+			`{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Think"},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"reasoning":"ing..."},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"content":"Done"},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "gpt-oss"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var reasoning, text string
+	for part := range sr.Stream {
+		switch p := part.(type) {
+		case *sdk.ReasoningDeltaPart:
+			reasoning += p.Text
+		case *sdk.TextDeltaPart:
+			text += p.Text
+		case *sdk.ErrorPart:
+			t.Fatalf("error: %v", p.Error)
+		}
+	}
+	if reasoning != "Thinking..." {
+		t.Errorf("reasoning fallback: got %q", reasoning)
+	}
+	if text != "Done" {
+		t.Errorf("text: got %q", text)
+	}
+}
+
+func TestDoStream_ReasoningClosedBeforeToolCall(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []string{
+			`{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Let me think..."},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"search","arguments":""}}]},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"q\":\"test\"}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":5,"completion_tokens":10,"total_tokens":15}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "deepseek-r1"},
+		Messages: []sdk.Message{sdk.UserMessage("search")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var events []sdk.StreamPartType
+	for part := range sr.Stream {
+		events = append(events, part.Type())
+	}
+
+	reasoningEndIdx := -1
+	toolInputStartIdx := -1
+	for i, ev := range events {
+		if ev == sdk.StreamPartTypeReasoningEnd && reasoningEndIdx == -1 {
+			reasoningEndIdx = i
+		}
+		if ev == sdk.StreamPartTypeToolInputStart && toolInputStartIdx == -1 {
+			toolInputStartIdx = i
+		}
+	}
+
+	if reasoningEndIdx == -1 {
+		t.Fatal("missing reasoning-end event")
+	}
+	if toolInputStartIdx == -1 {
+		t.Fatal("missing tool-input-start event")
+	}
+	if reasoningEndIdx >= toolInputStartIdx {
+		t.Errorf("reasoning-end (idx %d) should come before tool-input-start (idx %d)", reasoningEndIdx, toolInputStartIdx)
+	}
+}
+
+func TestDoStream_FlushOnAbruptEnd(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []string{
+			`{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"Thinking..."},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "m"},
+		Messages: []sdk.Message{sdk.UserMessage("hi")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var gotReasoningEnd, gotTextEnd, gotFinish bool
+	for part := range sr.Stream {
+		switch part.(type) {
+		case *sdk.ReasoningEndPart:
+			gotReasoningEnd = true
+		case *sdk.TextEndPart:
+			gotTextEnd = true
+		case *sdk.FinishPart:
+			gotFinish = true
+		}
+	}
+
+	if !gotReasoningEnd {
+		t.Error("missing ReasoningEndPart on abrupt stream end")
+	}
+	if !gotTextEnd {
+		t.Error("missing TextEndPart on abrupt stream end")
+	}
+	if !gotFinish {
+		t.Error("missing FinishPart on abrupt stream end")
+	}
+}
+
+func TestDoGenerate_AssistantReasoningInRequest(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+		}
+		json.NewDecoder(r.Body).Decode(&body)
+
+		if len(body.Messages) != 2 {
+			t.Fatalf("expected 2 messages, got %d", len(body.Messages))
+		}
+
+		var assistantMsg struct {
+			Role             string `json:"role"`
+			Content          string `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
+		}
+		json.Unmarshal(body.Messages[1], &assistantMsg)
+		if assistantMsg.Role != "assistant" {
+			t.Errorf("msg[1] role: got %q", assistantMsg.Role)
+		}
+		if assistantMsg.ReasoningContent != "I thought about it" {
+			t.Errorf("msg[1] reasoning_content: got %q", assistantMsg.ReasoningContent)
+		}
+		if assistantMsg.Content != "The answer" {
+			t.Errorf("msg[1] content: got %q", assistantMsg.Content)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "chatcmpl-rr", "model": "m",
+			"choices": []map[string]any{{
+				"index": 0, "finish_reason": "stop",
+				"message": map[string]any{"role": "assistant", "content": "OK"},
+			}},
+			"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 1, "total_tokens": 11},
+		})
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	_, err := p.DoGenerate(context.Background(), sdk.GenerateParams{
+		Model: &sdk.Model{ID: "m"},
+		Messages: []sdk.Message{
+			sdk.UserMessage("question"),
+			{
+				Role: sdk.MessageRoleAssistant,
+				Content: []sdk.MessagePart{
+					sdk.TextPart{Text: "The answer"},
+					sdk.ReasoningPart{Text: "I thought about it"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DoGenerate: %v", err)
+	}
+}
+
+func TestDoStream_EarlyToolCallDetection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher := w.(http.Flusher)
+
+		chunks := []string{
+			`{"id":"c1","choices":[{"index":0,"delta":{"role":"assistant","tool_calls":[{"index":0,"id":"call_full","type":"function","function":{"name":"get_time","arguments":"{}"}}]},"finish_reason":null}]}`,
+			`{"id":"c1","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":5,"total_tokens":8}}`,
+		}
+		for _, c := range chunks {
+			fmt.Fprintf(w, "data: %s\n\n", c)
+			flusher.Flush()
+		}
+		fmt.Fprintf(w, "data: [DONE]\n\n")
+		flusher.Flush()
+	}))
+	defer srv.Close()
+
+	p := openai.NewCompletions(openai.WithAPIKey("k"), openai.WithBaseURL(srv.URL))
+	sr, err := p.DoStream(context.Background(), sdk.GenerateParams{
+		Model:    &sdk.Model{ID: "m"},
+		Messages: []sdk.Message{sdk.UserMessage("time?")},
+	})
+	if err != nil {
+		t.Fatalf("DoStream: %v", err)
+	}
+
+	var events []sdk.StreamPartType
+	var toolCallCount int
+	for part := range sr.Stream {
+		events = append(events, part.Type())
+		if part.Type() == sdk.StreamPartTypeToolCall {
+			toolCallCount++
+		}
+	}
+
+	if toolCallCount != 1 {
+		t.Errorf("expected exactly 1 tool-call event, got %d", toolCallCount)
+	}
+
+	inputEndCount := 0
+	for _, ev := range events {
+		if ev == sdk.StreamPartTypeToolInputEnd {
+			inputEndCount++
+		}
+	}
+	if inputEndCount != 1 {
+		t.Errorf("expected exactly 1 tool-input-end event, got %d", inputEndCount)
+	}
+}
+
 // ---------- integration tests (real API, skipped without env) ----------
 
 func envOrSkip(t *testing.T, key string) string {
