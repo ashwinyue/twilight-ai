@@ -19,7 +19,7 @@ import (
 
 func TestDoGenerate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/messages" {
+		if r.URL.Path != "/messages" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Header.Get("x-api-key") != "test-key" {
@@ -874,7 +874,7 @@ func TestIntegration_DoStream_Reasoning(t *testing.T) {
 
 func TestListModels(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
+		if r.URL.Path != "/models" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		if r.Method != http.MethodGet {
@@ -965,7 +965,7 @@ func TestProviderTest_Unreachable(t *testing.T) {
 
 func TestTestModel_Supported(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models/claude-sonnet-4-20250514" {
+		if r.URL.Path != "/models/claude-sonnet-4-20250514" {
 			t.Errorf("unexpected path: %s", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")

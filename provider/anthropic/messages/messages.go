@@ -98,7 +98,7 @@ func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
 	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
-		Path:    "/v1/models",
+		Path:    "/models",
 		Headers: p.requestHeaders(),
 	})
 	if err != nil {
@@ -121,7 +121,7 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 	_, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
-		Path:    "/v1/models",
+		Path:    "/models",
 		Query:   map[string]string{"limit": "1"},
 		Headers: p.requestHeaders(),
 	})
@@ -135,7 +135,7 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 	_, err := utils.FetchJSON[anthropicModelObject](ctx, p.httpClient, &utils.RequestOptions{
 		Method:  http.MethodGet,
 		BaseURL: p.baseURL,
-		Path:    "/v1/models/" + modelID,
+		Path:    "/models/" + modelID,
 		Headers: p.requestHeaders(),
 	})
 	if err != nil {
