@@ -1092,6 +1092,147 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// ---------- ListModels / Test / TestModel unit tests ----------
+
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "gpt-4o", "object": "model", "owned_by": "openai"},
+				{"id": "gpt-4o-mini", "object": "model", "owned_by": "openai"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].ID != "gpt-4o" {
+		t.Errorf("expected first model 'gpt-4o', got %q", models[0].ID)
+	}
+	if models[1].ID != "gpt-4o-mini" {
+		t.Errorf("expected second model 'gpt-4o-mini', got %q", models[1].ID)
+	}
+}
+
+func TestProviderTest_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unhealthy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "invalid api key"},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("bad-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unreachable(t *testing.T) {
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL("http://127.0.0.1:1"),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnreachable {
+		t.Errorf("expected status Unreachable, got %q", result.Status)
+	}
+}
+
+func TestTestModel_Supported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models/gpt-4o" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "gpt-4o", "object": "model",
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "gpt-4o")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if !result.Supported {
+		t.Error("expected model to be supported")
+	}
+}
+
+func TestTestModel_NotSupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "model not found"},
+		})
+	}))
+	defer srv.Close()
+
+	p := completions.New(
+		completions.WithAPIKey("test-key"),
+		completions.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "nonexistent")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if result.Supported {
+		t.Error("expected model to not be supported")
+	}
+}
+
 func TestMain(m *testing.M) {
 	testutil.LoadEnv()
 	os.Exit(m.Run())

@@ -170,8 +170,16 @@ type mockProvider struct {
 	handler func(call int, params sdk.GenerateParams) (*sdk.GenerateResult, error)
 }
 
-func (m *mockProvider) Name() string                          { return "mock" }
-func (m *mockProvider) GetModels() ([]sdk.Model, error)       { return nil, nil }
+func (m *mockProvider) Name() string { return "mock" }
+func (m *mockProvider) ListModels(_ context.Context) ([]sdk.Model, error) {
+	return nil, nil
+}
+func (m *mockProvider) Test(_ context.Context) *sdk.ProviderTestResult {
+	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+}
+func (m *mockProvider) TestModel(_ context.Context, _ string) (*sdk.ModelTestResult, error) {
+	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+}
 
 func (m *mockProvider) DoGenerate(_ context.Context, params sdk.GenerateParams) (*sdk.GenerateResult, error) {
 	m.calls++

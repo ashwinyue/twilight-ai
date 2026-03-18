@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -93,8 +94,58 @@ func (p *Provider) Name() string {
 	return "anthropic-messages"
 }
 
-func (p *Provider) GetModels() ([]sdk.Model, error) {
-	return nil, nil
+func (p *Provider) ListModels(ctx context.Context) ([]sdk.Model, error) {
+	resp, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodGet,
+		BaseURL: p.baseURL,
+		Path:    "/v1/models",
+		Headers: p.requestHeaders(),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("anthropic: list models request failed: %w", err)
+	}
+
+	models := make([]sdk.Model, 0, len(resp.Data))
+	for _, m := range resp.Data {
+		models = append(models, sdk.Model{
+			ID:          m.ID,
+			DisplayName: m.DisplayName,
+			Provider:    p,
+			Type:        sdk.ModelTypeChat,
+		})
+	}
+	return models, nil
+}
+
+func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
+	_, err := utils.FetchJSON[modelsListResponse](ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodGet,
+		BaseURL: p.baseURL,
+		Path:    "/v1/models",
+		Query:   map[string]string{"limit": "1"},
+		Headers: p.requestHeaders(),
+	})
+	if err != nil {
+		return classifyError(err)
+	}
+	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+}
+
+func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error) {
+	_, err := utils.FetchJSON[anthropicModelObject](ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodGet,
+		BaseURL: p.baseURL,
+		Path:    "/v1/models/" + modelID,
+		Headers: p.requestHeaders(),
+	})
+	if err != nil {
+		var apiErr *utils.APIError
+		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
+			return &sdk.ModelTestResult{Supported: false, Message: "model not found"}, nil
+		}
+		return nil, fmt.Errorf("anthropic: test model request failed: %w", err)
+	}
+	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
 }
 
 func (p *Provider) ChatModel(id string) *sdk.Model {
@@ -604,5 +655,28 @@ func mapFinishReason(reason string) sdk.FinishReason {
 		return sdk.FinishReasonLength
 	default:
 		return sdk.FinishReasonUnknown
+	}
+}
+
+func classifyError(err error) *sdk.ProviderTestResult {
+	var apiErr *utils.APIError
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden {
+			return &sdk.ProviderTestResult{
+				Status:  sdk.ProviderStatusUnhealthy,
+				Message: fmt.Sprintf("authentication failed: %s", apiErr.Message),
+				Error:   err,
+			}
+		}
+		return &sdk.ProviderTestResult{
+			Status:  sdk.ProviderStatusUnhealthy,
+			Message: fmt.Sprintf("service error (%d): %s", apiErr.StatusCode, apiErr.Message),
+			Error:   err,
+		}
+	}
+	return &sdk.ProviderTestResult{
+		Status:  sdk.ProviderStatusUnreachable,
+		Message: fmt.Sprintf("connection failed: %s", err.Error()),
+		Error:   err,
 	}
 }

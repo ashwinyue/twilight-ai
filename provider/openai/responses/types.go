@@ -246,3 +246,16 @@ type responsesErrorChunk struct {
 		Message string `json:"message"`
 	} `json:"error"`
 }
+
+// --- Models API response types ---
+
+type modelsListResponse struct {
+	Data []modelObject `json:"data"`
+}
+
+type modelObject struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	Created int64  `json:"created"`
+	OwnedBy string `json:"owned_by"`
+}

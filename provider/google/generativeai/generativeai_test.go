@@ -1069,6 +1069,147 @@ func TestIntegration_ToolCall(t *testing.T) {
 	}
 }
 
+// ---------- ListModels / Test / TestModel unit tests ----------
+
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{
+				{"name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro"},
+				{"name": "models/gemini-2.5-flash", "displayName": "Gemini 2.5 Flash"},
+			},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].ID != "gemini-2.5-pro" {
+		t.Errorf("expected first model 'gemini-2.5-pro', got %q", models[0].ID)
+	}
+	if models[0].DisplayName != "Gemini 2.5 Pro" {
+		t.Errorf("expected display name 'Gemini 2.5 Pro', got %q", models[0].DisplayName)
+	}
+}
+
+func TestProviderTest_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"models": []map[string]any{},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unhealthy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "API key not valid"},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("bad-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unreachable(t *testing.T) {
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL("http://127.0.0.1:1"),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnreachable {
+		t.Errorf("expected status Unreachable, got %q", result.Status)
+	}
+}
+
+func TestTestModel_Supported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/models/gemini-2.5-pro" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"name": "models/gemini-2.5-pro", "displayName": "Gemini 2.5 Pro",
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "gemini-2.5-pro")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if !result.Supported {
+		t.Error("expected model to be supported")
+	}
+}
+
+func TestTestModel_NotSupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "model not found"},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "nonexistent")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if result.Supported {
+		t.Error("expected model to not be supported")
+	}
+}
+
 func TestMain(m *testing.M) {
 	testutil.LoadEnv()
 	os.Exit(m.Run())

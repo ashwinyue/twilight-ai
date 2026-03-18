@@ -870,6 +870,148 @@ func TestIntegration_DoStream_Reasoning(t *testing.T) {
 	}
 }
 
+// ---------- ListModels / Test / TestModel unit tests ----------
+
+func TestListModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		if r.Method != http.MethodGet {
+			t.Errorf("expected GET, got %s", r.Method)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{
+				{"id": "claude-sonnet-4-20250514", "type": "model", "display_name": "Claude Sonnet 4"},
+				{"id": "claude-3-5-haiku-20241022", "type": "model", "display_name": "Claude 3.5 Haiku"},
+			},
+			"has_more": false,
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	models, err := p.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("ListModels failed: %v", err)
+	}
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d", len(models))
+	}
+	if models[0].ID != "claude-sonnet-4-20250514" {
+		t.Errorf("expected first model id 'claude-sonnet-4-20250514', got %q", models[0].ID)
+	}
+	if models[0].DisplayName != "Claude Sonnet 4" {
+		t.Errorf("expected display name 'Claude Sonnet 4', got %q", models[0].DisplayName)
+	}
+}
+
+func TestProviderTest_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"data": []map[string]any{}, "has_more": false,
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unhealthy(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "invalid x-api-key"},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("bad-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_Unreachable(t *testing.T) {
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL("http://127.0.0.1:1"),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnreachable {
+		t.Errorf("expected status Unreachable, got %q", result.Status)
+	}
+}
+
+func TestTestModel_Supported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/models/claude-sonnet-4-20250514" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"id": "claude-sonnet-4-20250514", "type": "model", "display_name": "Claude Sonnet 4",
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "claude-sonnet-4-20250514")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if !result.Supported {
+		t.Error("expected model to be supported")
+	}
+}
+
+func TestTestModel_NotSupported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "model not found"},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result, err := p.TestModel(context.Background(), "nonexistent")
+	if err != nil {
+		t.Fatalf("TestModel failed: %v", err)
+	}
+	if result.Supported {
+		t.Error("expected model to not be supported")
+	}
+}
+
 func TestMain(m *testing.M) {
 	testutil.LoadEnv()
 	os.Exit(m.Run())

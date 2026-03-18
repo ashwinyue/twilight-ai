@@ -1,5 +1,7 @@
 package sdk
 
+import "context"
+
 type ModelType string
 
 const (
@@ -12,4 +14,9 @@ type Model struct {
 	Provider    Provider
 	Type        ModelType
 	MaxTokens   int
+}
+
+// Test checks whether this model is supported by its provider.
+func (m *Model) Test(ctx context.Context) (*ModelTestResult, error) {
+	return m.Provider.TestModel(ctx, m.ID)
 }

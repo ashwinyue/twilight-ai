@@ -120,3 +120,19 @@ type safetyRating struct {
 	Probability string `json:"probability,omitempty"`
 	Blocked     bool   `json:"blocked,omitempty"`
 }
+
+// --- Models API response types ---
+
+type googleModelsListResponse struct {
+	Models        []googleModelObject `json:"models"`
+	NextPageToken string              `json:"nextPageToken,omitempty"`
+}
+
+type googleModelObject struct {
+	Name                       string   `json:"name"`
+	DisplayName                string   `json:"displayName"`
+	Description                string   `json:"description"`
+	InputTokenLimit            int      `json:"inputTokenLimit"`
+	OutputTokenLimit           int      `json:"outputTokenLimit"`
+	SupportedGenerationMethods []string `json:"supportedGenerationMethods"`
+}
