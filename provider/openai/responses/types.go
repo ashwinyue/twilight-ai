@@ -86,8 +86,9 @@ type responsesReasoningSummaryText struct {
 }
 
 type responsesReasoningItem struct {
-	Type    string                          `json:"type"`
-	Summary []responsesReasoningSummaryText `json:"summary"`
+	Type             string                          `json:"type"`
+	Summary          []responsesReasoningSummaryText `json:"summary"`
+	EncryptedContent string                          `json:"encrypted_content,omitempty"`
 }
 
 // --- Response types ---
@@ -182,6 +183,8 @@ type responsesOutputItemAddedChunk struct {
 		// function_call fields
 		CallID string `json:"call_id,omitempty"`
 		Name   string `json:"name,omitempty"`
+		// reasoning fields
+		EncryptedContent string `json:"encrypted_content,omitempty"`
 	} `json:"item"`
 }
 

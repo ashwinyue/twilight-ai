@@ -17,9 +17,9 @@ const (
 	defaultAnthropicVer = "2023-06-01"
 
 	// Content block types for Anthropic API
-	blockTypeText      = "text"
-	blockTypeThinking  = "thinking"
-	blockTypeToolUse   = "tool_use"
+	blockTypeText     = "text"
+	blockTypeThinking = "thinking"
+	blockTypeToolUse  = "tool_use"
 )
 
 // ThinkingConfig controls extended thinking for Anthropic models.
@@ -349,10 +349,11 @@ func convertAssistantMessage(msg sdk.Message) anthropicMessage {
 		case sdk.TextPart:
 			blocks = append(blocks, contentBlock{Type: blockTypeText, Text: p.Text})
 		case sdk.ReasoningPart:
+			sig := extractAnthropicSignature(p.ProviderMetadata)
 			blocks = append(blocks, contentBlock{
 				Type:      blockTypeThinking,
 				Thinking:  p.Text,
-				Signature: p.Signature,
+				Signature: sig,
 			})
 		case sdk.ToolCallPart:
 			id := p.ToolCallID
@@ -408,6 +409,11 @@ func (p *Provider) parseResponse(resp *messagesResponse) (*sdk.GenerateResult, e
 			result.Text += block.Text
 		case blockTypeThinking:
 			result.Reasoning += block.Thinking
+			if block.Signature != "" {
+				result.ReasoningProviderMetadata = map[string]any{
+					"anthropic": map[string]any{"signature": block.Signature},
+				}
+			}
 		case "redacted_thinking":
 			// Redacted thinking blocks don't contain readable text
 		case blockTypeToolUse:
@@ -500,9 +506,9 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 					send(&sdk.ReasoningStartPart{ID: messageID})
 				case blockTypeToolUse:
 					activeBlocks[idx] = &streamingBlock{
-						blockType:  blockTypeToolUse,
-						toolID:     cb.ID,
-						toolName:   cb.Name,
+						blockType: blockTypeToolUse,
+						toolID:    cb.ID,
+						toolName:  cb.Name,
 					}
 					send(&sdk.ToolInputStartPart{
 						ID:       cb.ID,
@@ -532,7 +538,9 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 						})
 					}
 				case "signature_delta":
-					// signature is part of thinking blocks; no SDK stream part needed
+					if sb != nil {
+						sb.signature += delta.Signature
+					}
 				}
 
 			case "content_block_stop":
@@ -550,7 +558,13 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 				case blockTypeText:
 					send(&sdk.TextEndPart{ID: messageID})
 				case blockTypeThinking:
-					send(&sdk.ReasoningEndPart{ID: messageID})
+					var meta map[string]any
+					if sb.signature != "" {
+						meta = map[string]any{
+							"anthropic": map[string]any{"signature": sb.signature},
+						}
+					}
+					send(&sdk.ReasoningEndPart{ID: messageID, ProviderMetadata: meta})
 				case blockTypeToolUse:
 					send(&sdk.ToolInputEndPart{ID: sb.toolID})
 					var input any
@@ -621,6 +635,7 @@ type streamingBlock struct {
 	toolID    string
 	toolName  string
 	args      string
+	signature string
 }
 
 // ---------- helpers ----------
@@ -656,6 +671,18 @@ func mapFinishReason(reason string) sdk.FinishReason {
 	default:
 		return sdk.FinishReasonUnknown
 	}
+}
+
+func extractAnthropicSignature(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	am, ok := meta["anthropic"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	sig, _ := am["signature"].(string)
+	return sig
 }
 
 func classifyError(err error) *sdk.ProviderTestResult {

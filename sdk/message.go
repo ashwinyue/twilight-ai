@@ -32,7 +32,8 @@ type MessagePart interface {
 // --- Text ---
 
 type TextPart struct {
-	Text string `json:"text"`
+	Text             string         `json:"text"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
 func (p TextPart) PartType() MessagePartType { return MessagePartTypeText }
@@ -40,8 +41,8 @@ func (p TextPart) PartType() MessagePartType { return MessagePartTypeText }
 // --- Reasoning ---
 
 type ReasoningPart struct {
-	Text      string `json:"text"`
-	Signature string `json:"signature,omitempty"`
+	Text             string         `json:"text"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
 func (p ReasoningPart) PartType() MessagePartType { return MessagePartTypeReasoning }
@@ -68,9 +69,10 @@ func (p FilePart) PartType() MessagePartType { return MessagePartTypeFile }
 // --- Tool Call (in assistant messages) ---
 
 type ToolCallPart struct {
-	ToolCallID string `json:"toolCallId"`
-	ToolName   string `json:"toolName"`
-	Input      any    `json:"input"`
+	ToolCallID       string         `json:"toolCallId"`
+	ToolName         string         `json:"toolName"`
+	Input            any            `json:"input"`
+	ProviderMetadata map[string]any `json:"providerMetadata,omitempty"`
 }
 
 func (p ToolCallPart) PartType() MessagePartType { return MessagePartTypeToolCall }

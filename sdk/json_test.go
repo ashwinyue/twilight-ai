@@ -75,7 +75,7 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 		Role: sdk.MessageRoleAssistant,
 		Content: []sdk.MessagePart{
 			sdk.TextPart{Text: "answer"},
-			sdk.ReasoningPart{Text: "thinking", Signature: "sig123"},
+			sdk.ReasoningPart{Text: "thinking", ProviderMetadata: map[string]any{"anthropic": map[string]any{"signature": "sig123"}}},
 			sdk.ImagePart{Image: "data:image/png;base64,abc", MediaType: "image/png"},
 			sdk.FilePart{Data: "base64data", MediaType: "application/pdf", Filename: "doc.pdf"},
 			sdk.ToolCallPart{ToolCallID: "tc1", ToolName: "search", Input: map[string]any{"q": "go"}},
@@ -113,8 +113,18 @@ func TestMessage_JSON_AllPartTypes(t *testing.T) {
 	}
 
 	rp := got.Content[1].(sdk.ReasoningPart)
-	if rp.Text != "thinking" || rp.Signature != "sig123" {
-		t.Errorf("reasoning: got %+v", rp)
+	if rp.Text != "thinking" {
+		t.Errorf("reasoning text: got %q, want %q", rp.Text, "thinking")
+	}
+	if rp.ProviderMetadata == nil {
+		t.Fatal("reasoning: expected providerMetadata to be non-nil")
+	}
+	am, ok := rp.ProviderMetadata["anthropic"].(map[string]any)
+	if !ok {
+		t.Fatalf("reasoning: expected providerMetadata[\"anthropic\"] to be map, got %T", rp.ProviderMetadata["anthropic"])
+	}
+	if sig, _ := am["signature"].(string); sig != "sig123" {
+		t.Errorf("reasoning signature: got %q, want %q", sig, "sig123")
 	}
 
 	fp := got.Content[3].(sdk.FilePart)

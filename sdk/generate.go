@@ -63,9 +63,10 @@ type StepResult struct {
 }
 
 type GenerateResult struct {
-	Text            string           `json:"text"`
-	Reasoning       string           `json:"reasoning,omitempty"`
-	FinishReason    FinishReason     `json:"finishReason"`
+	Text                      string           `json:"text"`
+	Reasoning                 string           `json:"reasoning,omitempty"`
+	ReasoningProviderMetadata map[string]any   `json:"-"`
+	FinishReason              FinishReason     `json:"finishReason"`
 	RawFinishReason string           `json:"rawFinishReason,omitempty"`
 	Usage           Usage            `json:"usage"`
 	Sources         []Source         `json:"sources,omitempty"`

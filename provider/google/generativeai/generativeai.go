@@ -262,23 +262,35 @@ func convertAssistantMessage(msg sdk.Message) content {
 		switch p := part.(type) {
 		case sdk.TextPart:
 			if p.Text != "" {
-				parts = append(parts, contentPart{Text: p.Text})
+				cp := contentPart{Text: p.Text}
+				if sig := extractGoogleThoughtSignature(p.ProviderMetadata); sig != "" {
+					cp.ThoughtSignature = sig
+				}
+				parts = append(parts, cp)
 			}
 		case sdk.ReasoningPart:
 			if p.Text != "" {
 				thought := true
-				parts = append(parts, contentPart{
+				cp := contentPart{
 					Text:    p.Text,
 					Thought: &thought,
-				})
+				}
+				if sig := extractGoogleThoughtSignature(p.ProviderMetadata); sig != "" {
+					cp.ThoughtSignature = sig
+				}
+				parts = append(parts, cp)
 			}
 		case sdk.ToolCallPart:
-			parts = append(parts, contentPart{
+			cp := contentPart{
 				FunctionCall: &functionCall{
 					Name: p.ToolName,
 					Args: p.Input,
 				},
-			})
+			}
+			if sig := extractGoogleThoughtSignature(p.ProviderMetadata); sig != "" {
+				cp.ThoughtSignature = sig
+			}
+			parts = append(parts, cp)
 		}
 	}
 	return content{Role: "model", Parts: parts}
@@ -376,6 +388,11 @@ func (p *Provider) parseResponse(resp *generateResponse) (*sdk.GenerateResult, e
 				isThought := part.Thought != nil && *part.Thought
 				if isThought {
 					result.Reasoning += part.Text
+					if part.ThoughtSignature != "" {
+						result.ReasoningProviderMetadata = map[string]any{
+							"google": map[string]any{"thoughtSignature": part.ThoughtSignature},
+						}
+					}
 				} else {
 					result.Text += part.Text
 				}
@@ -420,6 +437,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			blockCounter       int
 			currentTextID      string
 			currentReasoningID string
+			lastThoughtSig     string
 		)
 
 		send := func(part sdk.StreamPart) bool {
@@ -431,13 +449,22 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 			}
 		}
 
+		reasoningEndMeta := func() map[string]any {
+			if lastThoughtSig == "" {
+				return nil
+			}
+			return map[string]any{
+				"google": map[string]any{"thoughtSignature": lastThoughtSig},
+			}
+		}
+
 		flush := func() {
 			if flushed {
 				return
 			}
 			flushed = true
 			if reasoningStartSent {
-				send(&sdk.ReasoningEndPart{ID: currentReasoningID})
+				send(&sdk.ReasoningEndPart{ID: currentReasoningID, ProviderMetadata: reasoningEndMeta()})
 				reasoningStartSent = false
 			}
 			if textStartSent {
@@ -481,7 +508,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 					switch {
 					case part.FunctionCall != nil:
 						if reasoningStartSent {
-							send(&sdk.ReasoningEndPart{ID: currentReasoningID})
+							send(&sdk.ReasoningEndPart{ID: currentReasoningID, ProviderMetadata: reasoningEndMeta()})
 							reasoningStartSent = false
 						}
 						if textStartSent {
@@ -517,6 +544,9 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 					case part.Text != "":
 						isThought := part.Thought != nil && *part.Thought
 						if isThought {
+							if part.ThoughtSignature != "" {
+								lastThoughtSig = part.ThoughtSignature
+							}
 							if textStartSent {
 								send(&sdk.TextEndPart{ID: currentTextID})
 								textStartSent = false
@@ -530,7 +560,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 							send(&sdk.ReasoningDeltaPart{ID: currentReasoningID, Text: part.Text})
 						} else {
 							if reasoningStartSent {
-								send(&sdk.ReasoningEndPart{ID: currentReasoningID})
+								send(&sdk.ReasoningEndPart{ID: currentReasoningID, ProviderMetadata: reasoningEndMeta()})
 								reasoningStartSent = false
 							}
 							if !textStartSent {
@@ -547,7 +577,7 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 							textStartSent = false
 						}
 						if reasoningStartSent {
-							send(&sdk.ReasoningEndPart{ID: currentReasoningID})
+							send(&sdk.ReasoningEndPart{ID: currentReasoningID, ProviderMetadata: reasoningEndMeta()})
 							reasoningStartSent = false
 						}
 						send(&sdk.StreamFilePart{
@@ -652,6 +682,18 @@ func mapFinishReason(reason string, hasToolCalls bool) sdk.FinishReason {
 	default:
 		return sdk.FinishReasonOther
 	}
+}
+
+func extractGoogleThoughtSignature(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	gm, ok := meta["google"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	sig, _ := gm["thoughtSignature"].(string)
+	return sig
 }
 
 func classifyError(err error) *sdk.ProviderTestResult {

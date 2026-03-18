@@ -60,11 +60,12 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 			}
 
 			var (
-				stepText      string
-				stepReasoning string
-				stepToolCalls []ToolCall
-				stepUsage     Usage
-				stepResponse  ResponseMetadata
+				stepText          string
+				stepReasoning     string
+				stepReasoningMeta map[string]any
+				stepToolCalls     []ToolCall
+				stepUsage         Usage
+				stepResponse      ResponseMetadata
 			)
 
 			for part := range provSR.Stream {
@@ -73,6 +74,10 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 					stepText += p.Text
 				case *ReasoningDeltaPart:
 					stepReasoning += p.Text
+				case *ReasoningEndPart:
+					if p.ProviderMetadata != nil {
+						stepReasoningMeta = p.ProviderMetadata
+					}
 				case *StreamToolCallPart:
 					stepToolCalls = append(stepToolCalls, ToolCall{
 						ToolCallID: p.ToolCallID,
@@ -99,7 +104,7 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 
 			// No tool calls or not a tool-calls finish → done
 			if lastFinishReason != FinishReasonToolCalls || len(stepToolCalls) == 0 || !hasExecutableTools(stepToolCalls, toolMap) {
-				stepMsgs := buildStepMessages(stepText, stepReasoning, stepToolCalls, nil, &stepUsage)
+				stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, nil, &stepUsage)
 				stepR := StepResult{
 					Text:            stepText,
 					Reasoning:       stepReasoning,
@@ -124,7 +129,7 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 				break
 			}
 
-			stepMsgs := buildStepMessages(stepText, stepReasoning, stepToolCalls, toolResults, &stepUsage)
+			stepMsgs := buildStepMessages(stepText, stepReasoning, stepReasoningMeta, stepToolCalls, toolResults, &stepUsage)
 			stepR := StepResult{
 				Text:            stepText,
 				Reasoning:       stepReasoning,

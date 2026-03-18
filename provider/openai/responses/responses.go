@@ -257,6 +257,7 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 	var items []json.RawMessage
 	var textParts []responsesOutputTextPart
 	var reasoningSummary []responsesReasoningSummaryText
+	var encryptedContent string
 
 	for _, part := range msg.Content {
 		switch p := part.(type) {
@@ -271,6 +272,9 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 				Type: "summary_text",
 				Text: p.Text,
 			})
+			if ec := extractOpenAIEncryptedContent(p.ProviderMetadata); ec != "" {
+				encryptedContent = ec
+			}
 
 		case sdk.ToolCallPart:
 			args, err := json.Marshal(p.Input)
@@ -292,10 +296,12 @@ func convertResponsesAssistantMessage(msg sdk.Message) []json.RawMessage {
 
 	var prefix []json.RawMessage
 	if len(reasoningSummary) > 0 {
-		prefix = append(prefix, marshalRaw(responsesReasoningItem{
-			Type:    "reasoning",
-			Summary: reasoningSummary,
-		}))
+		ri := responsesReasoningItem{
+			Type:             "reasoning",
+			Summary:          reasoningSummary,
+			EncryptedContent: encryptedContent,
+		}
+		prefix = append(prefix, marshalRaw(ri))
 	}
 	if len(textParts) > 0 {
 		prefix = append(prefix, marshalRaw(responsesAssistantMessage{
@@ -368,6 +374,14 @@ func (p *Provider) parseResponse(resp *responsesResponse) (*sdk.GenerateResult, 
 			for _, s := range item.Summary {
 				if s.Type == "summary_text" {
 					result.Reasoning += s.Text
+				}
+			}
+			if item.EncryptedContent != "" {
+				result.ReasoningProviderMetadata = map[string]any{
+					"openai": map[string]any{
+						"reasoningEncryptedContent": item.EncryptedContent,
+						"itemId":                    item.ID,
+					},
 				}
 			}
 
@@ -495,7 +509,16 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 					}
 				case outputTypeReasoning:
 					if !reasoningStartSent {
-						send(&sdk.ReasoningStartPart{ID: chunk.Item.ID})
+						var meta map[string]any
+						if chunk.Item.EncryptedContent != "" {
+							meta = map[string]any{
+								"openai": map[string]any{
+									"reasoningEncryptedContent": chunk.Item.EncryptedContent,
+									"itemId":                    chunk.Item.ID,
+								},
+							}
+						}
+						send(&sdk.ReasoningStartPart{ID: chunk.Item.ID, ProviderMetadata: meta})
 						reasoningStartSent = true
 					}
 				case outputTypeFunctionCall:
@@ -722,6 +745,18 @@ func convertResponsesUsage(u *responsesUsage) sdk.Usage {
 			TextTokens:      outputTokens - reasoningTokens,
 		},
 	}
+}
+
+func extractOpenAIEncryptedContent(meta map[string]any) string {
+	if meta == nil {
+		return ""
+	}
+	om, ok := meta["openai"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	ec, _ := om["reasoningEncryptedContent"].(string)
+	return ec
 }
 
 func textFromParts(parts []sdk.MessagePart) string {

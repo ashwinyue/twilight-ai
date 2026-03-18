@@ -48,16 +48,20 @@ func addUsage(total, step *Usage) Usage {
 // buildStepMessages creates the messages produced by a step: an assistant
 // message (text/reasoning/tool-calls) and optionally a tool message.
 // The usage is attached to the assistant message for output tracking.
-func buildStepMessages(text, reasoning string, toolCalls []ToolCall, toolResults []ToolResultPart, usage *Usage) []Message {
+func buildStepMessages(text, reasoning string, reasoningMeta map[string]any, toolCalls []ToolCall, toolResults []ToolResultPart, usage *Usage) []Message {
 	var assistantParts []MessagePart
 	if reasoning != "" {
-		assistantParts = append(assistantParts, ReasoningPart{Text: reasoning})
+		assistantParts = append(assistantParts, ReasoningPart{Text: reasoning, ProviderMetadata: reasoningMeta})
 	}
 	if text != "" {
 		assistantParts = append(assistantParts, TextPart{Text: text})
 	}
 	for _, tc := range toolCalls {
-		assistantParts = append(assistantParts, ToolCallPart(tc))
+		assistantParts = append(assistantParts, ToolCallPart{
+			ToolCallID: tc.ToolCallID,
+			ToolName:   tc.ToolName,
+			Input:      tc.Input,
+		})
 	}
 
 	msgs := []Message{{Role: MessageRoleAssistant, Content: assistantParts, Usage: usage}}
