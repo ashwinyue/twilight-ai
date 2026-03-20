@@ -128,40 +128,65 @@ func ToolMessage(results ...ToolResultPart) Message {
 // --- JSON ---
 
 func (m Message) MarshalJSON() ([]byte, error) {
-	parts := make([]json.RawMessage, 0, len(m.Content))
-	for _, p := range m.Content {
-		raw, err := marshalPart(p)
-		if err != nil {
-			return nil, err
+	// Single TextPart with no metadata → emit content as a plain string.
+	var content any
+	if len(m.Content) == 1 {
+		if tp, ok := m.Content[0].(TextPart); ok && len(tp.ProviderMetadata) == 0 {
+			content = tp.Text
 		}
-		parts = append(parts, raw)
+	}
+	if content == nil {
+		parts := make([]json.RawMessage, 0, len(m.Content))
+		for _, p := range m.Content {
+			raw, err := marshalPart(p)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, raw)
+		}
+		content = parts
 	}
 	if m.Usage != nil {
 		return json.Marshal(struct {
-			Role    MessageRole       `json:"role"`
-			Content []json.RawMessage `json:"content"`
-			Usage   *Usage            `json:"usage,omitempty"`
-		}{Role: m.Role, Content: parts, Usage: m.Usage})
+			Role    MessageRole `json:"role"`
+			Content any         `json:"content"`
+			Usage   *Usage      `json:"usage,omitempty"`
+		}{Role: m.Role, Content: content, Usage: m.Usage})
 	}
 	return json.Marshal(struct {
-		Role    MessageRole       `json:"role"`
-		Content []json.RawMessage `json:"content"`
-	}{Role: m.Role, Content: parts})
+		Role    MessageRole `json:"role"`
+		Content any         `json:"content"`
+	}{Role: m.Role, Content: content})
 }
 
 func (m *Message) UnmarshalJSON(data []byte) error {
 	var raw struct {
-		Role    MessageRole       `json:"role"`
-		Content []json.RawMessage `json:"content"`
-		Usage   *Usage            `json:"usage,omitempty"`
+		Role    MessageRole     `json:"role"`
+		Content json.RawMessage `json:"content"`
+		Usage   *Usage          `json:"usage,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
 	}
 	m.Role = raw.Role
 	m.Usage = raw.Usage
-	m.Content = make([]MessagePart, 0, len(raw.Content))
-	for _, r := range raw.Content {
+
+	// content can be a string or an array of parts.
+	if len(raw.Content) > 0 && raw.Content[0] == '"' {
+		var s string
+		if err := json.Unmarshal(raw.Content, &s); err != nil {
+			return fmt.Errorf("unmarshal string content: %w", err)
+		}
+		m.Content = []MessagePart{TextPart{Text: s}}
+		return nil
+	}
+
+	var parts []json.RawMessage
+	if err := json.Unmarshal(raw.Content, &parts); err != nil {
+		return fmt.Errorf("unmarshal content array: %w", err)
+	}
+	m.Content = make([]MessagePart, 0, len(parts))
+	for _, r := range parts {
 		p, err := unmarshalPart(r)
 		if err != nil {
 			return err

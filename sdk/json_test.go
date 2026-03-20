@@ -171,6 +171,107 @@ func TestMessage_JSON_FromRawJSON(t *testing.T) {
 	}
 }
 
+func TestMessage_JSON_StringContent_Unmarshal(t *testing.T) {
+	raw := `{"role": "user", "content": "Hello, world!"}`
+
+	var msg sdk.Message
+	if err := json.Unmarshal([]byte(raw), &msg); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if msg.Role != sdk.MessageRoleUser {
+		t.Errorf("role: got %q, want %q", msg.Role, sdk.MessageRoleUser)
+	}
+	if len(msg.Content) != 1 {
+		t.Fatalf("parts: got %d, want 1", len(msg.Content))
+	}
+	tp, ok := msg.Content[0].(sdk.TextPart)
+	if !ok {
+		t.Fatalf("part type: got %T, want TextPart", msg.Content[0])
+	}
+	if tp.Text != "Hello, world!" {
+		t.Errorf("text: got %q, want %q", tp.Text, "Hello, world!")
+	}
+}
+
+func TestMessage_JSON_SingleTextPart_MarshalAsString(t *testing.T) {
+	msg := sdk.Message{
+		Role:    sdk.MessageRoleUser,
+		Content: []sdk.MessagePart{sdk.TextPart{Text: "Hello"}},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+
+	var content string
+	if err := json.Unmarshal(raw["content"], &content); err != nil {
+		t.Fatalf("content should be a string, got: %s", raw["content"])
+	}
+	if content != "Hello" {
+		t.Errorf("content: got %q, want %q", content, "Hello")
+	}
+}
+
+func TestMessage_JSON_StringContent_RoundTrip(t *testing.T) {
+	msg := sdk.UserMessage("round trip test")
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	t.Logf("json: %s", data)
+
+	var got sdk.Message
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.Role != sdk.MessageRoleUser {
+		t.Errorf("role: got %q", got.Role)
+	}
+	if len(got.Content) != 1 {
+		t.Fatalf("parts: got %d, want 1", len(got.Content))
+	}
+	tp, ok := got.Content[0].(sdk.TextPart)
+	if !ok {
+		t.Fatalf("part type: got %T, want TextPart", got.Content[0])
+	}
+	if tp.Text != "round trip test" {
+		t.Errorf("text: got %q", tp.Text)
+	}
+}
+
+func TestMessage_JSON_TextPartWithMetadata_MarshalAsArray(t *testing.T) {
+	msg := sdk.Message{
+		Role: sdk.MessageRoleAssistant,
+		Content: []sdk.MessagePart{
+			sdk.TextPart{Text: "answer", ProviderMetadata: map[string]any{"key": "val"}},
+		},
+	}
+
+	data, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatalf("unmarshal raw: %v", err)
+	}
+
+	// Should be an array because TextPart has ProviderMetadata.
+	if raw["content"][0] != '[' {
+		t.Errorf("content should be an array when TextPart has metadata, got: %s", raw["content"])
+	}
+}
+
 func TestUsage_JSON(t *testing.T) {
 	u := sdk.Usage{
 		InputTokens:  10,
