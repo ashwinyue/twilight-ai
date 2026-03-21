@@ -56,6 +56,10 @@ func (c *Client) GenerateTextResult(ctx context.Context, options ...GenerateOpti
 	)
 
 	for step := 0; shouldContinueLoop(cfg.MaxSteps, step); step++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+
 		if step > 0 {
 			messages = applyPrepareStep(cfg, messages)
 		}

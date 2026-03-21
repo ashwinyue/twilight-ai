@@ -46,6 +46,10 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 		var allMessages []Message
 
 		for step := 0; shouldContinueLoop(cfg.MaxSteps, step); step++ {
+			if ctx.Err() != nil {
+				break
+			}
+
 			if step > 0 {
 				messages = applyPrepareStep(cfg, messages)
 			}
@@ -98,6 +102,10 @@ func (c *Client) StreamText(ctx context.Context, options ...GenerateOption) (*St
 				if !send(part) {
 					break
 				}
+			}
+
+			if ctx.Err() != nil {
+				break
 			}
 
 			totalUsage = addUsage(&totalUsage, &stepUsage)

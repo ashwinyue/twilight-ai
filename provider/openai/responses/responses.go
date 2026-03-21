@@ -431,10 +431,10 @@ func (p *Provider) DoStream(ctx context.Context, params sdk.GenerateParams) (*sd
 		defer close(ch)
 
 		var (
-			responseID      string
-			responseModel   string
-			responseCreated int64
-			usage           sdk.Usage
+			responseID       string
+			responseModel    string
+			responseCreated  int64
+			usage            sdk.Usage
 			incompleteReason string
 			hasFunctionCall  bool
 
