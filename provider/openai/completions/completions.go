@@ -98,14 +98,31 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Path:    "/models/" + modelID,
 		Headers: utils.AuthHeader(p.apiKey),
 	})
-	if err != nil {
-		var apiErr *utils.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
-			return &sdk.ModelTestResult{Supported: false, Message: "model not found"}, nil
-		}
+	if err == nil {
+		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+	}
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("openai: test model request failed: %w", err)
 	}
-	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+
+	// GET /models/{id} returned 404 — fall back to a minimal generation
+	// request for providers that don't implement the models listing API.
+	status, probeErr := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodPost,
+		BaseURL: p.baseURL,
+		Path:    "/chat/completions",
+		Headers: utils.AuthHeader(p.apiKey),
+		Body: map[string]any{
+			"model":      modelID,
+			"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+			"max_tokens": 1,
+		},
+	})
+	if probeErr != nil {
+		return nil, fmt.Errorf("openai: probe model request failed: %w", probeErr)
+	}
+	return sdk.ClassifyProbeStatus(status)
 }
 
 // ChatModel creates a Model bound to this provider.

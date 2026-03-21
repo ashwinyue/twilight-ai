@@ -97,14 +97,29 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Path:    "/models/" + modelID,
 		Headers: utils.AuthHeader(p.apiKey),
 	})
-	if err != nil {
-		var apiErr *utils.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
-			return &sdk.ModelTestResult{Supported: false, Message: "model not found"}, nil
-		}
+	if err == nil {
+		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+	}
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("openai-responses: test model request failed: %w", err)
 	}
-	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+
+	status, probeErr := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodPost,
+		BaseURL: p.baseURL,
+		Path:    "/responses",
+		Headers: utils.AuthHeader(p.apiKey),
+		Body: map[string]any{
+			"model":             modelID,
+			"input":             "hi",
+			"max_output_tokens": 1,
+		},
+	})
+	if probeErr != nil {
+		return nil, fmt.Errorf("openai-responses: probe model request failed: %w", probeErr)
+	}
+	return sdk.ClassifyProbeStatus(status)
 }
 
 func (p *Provider) ChatModel(id string) *sdk.Model {

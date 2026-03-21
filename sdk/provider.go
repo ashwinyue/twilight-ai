@@ -1,6 +1,10 @@
 package sdk
 
-import "context"
+import (
+	"context"
+	"fmt"
+	"net/http"
+)
 
 // ProviderStatus represents the health status of a provider.
 type ProviderStatus string
@@ -22,6 +26,26 @@ type ProviderTestResult struct {
 type ModelTestResult struct {
 	Supported bool
 	Message   string
+}
+
+// ClassifyProbeStatus maps an HTTP status code from a minimal generation
+// request to a ModelTestResult. Providers use this as a fallback when the
+// models listing API (GET /models/{id}) is unavailable.
+func ClassifyProbeStatus(statusCode int) (*ModelTestResult, error) {
+	switch {
+	case statusCode >= 200 && statusCode <= 299:
+		return &ModelTestResult{Supported: true, Message: "supported"}, nil
+	case statusCode == http.StatusBadRequest,
+		statusCode == http.StatusUnprocessableEntity,
+		statusCode == http.StatusTooManyRequests:
+		return &ModelTestResult{Supported: true, Message: "supported"}, nil
+	case statusCode == http.StatusNotFound:
+		return &ModelTestResult{Supported: false, Message: "model not found"}, nil
+	case statusCode == http.StatusUnauthorized, statusCode == http.StatusForbidden:
+		return nil, fmt.Errorf("authentication failed (HTTP %d)", statusCode)
+	default:
+		return nil, fmt.Errorf("unexpected status %d", statusCode)
+	}
 }
 
 // Provider is the interface that AI backends must implement.

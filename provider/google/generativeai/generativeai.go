@@ -102,14 +102,28 @@ func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTes
 		Path:    "/" + modelPath,
 		Headers: p.authHeaders(),
 	})
-	if err != nil {
-		var apiErr *utils.APIError
-		if errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusNotFound {
-			return &sdk.ModelTestResult{Supported: false, Message: "model not found"}, nil
-		}
+	if err == nil {
+		return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+	}
+	var apiErr *utils.APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusNotFound {
 		return nil, fmt.Errorf("google: test model request failed: %w", err)
 	}
-	return &sdk.ModelTestResult{Supported: true, Message: "supported"}, nil
+
+	status, probeErr := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodPost,
+		BaseURL: p.baseURL,
+		Path:    "/" + modelPath + ":generateContent",
+		Headers: p.authHeaders(),
+		Body: map[string]any{
+			"contents":         []map[string]any{{"parts": []map[string]string{{"text": "hi"}}}},
+			"generationConfig": map[string]int{"maxOutputTokens": 1},
+		},
+	})
+	if probeErr != nil {
+		return nil, fmt.Errorf("google: probe model request failed: %w", probeErr)
+	}
+	return sdk.ClassifyProbeStatus(status)
 }
 
 func (p *Provider) ChatModel(id string) *sdk.Model {

@@ -143,6 +143,23 @@ func FetchRaw(ctx context.Context, client *http.Client, opts *RequestOptions) (*
 	return resp, nil
 }
 
+// ProbeStatus sends a request and returns only the HTTP status code.
+// The response body is always drained and closed. This is useful for
+// lightweight endpoint probes where only reachability matters.
+func ProbeStatus(ctx context.Context, client *http.Client, opts *RequestOptions) (int, error) {
+	req, err := BuildRequest(ctx, opts)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("request failed: %w", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	_ = resp.Body.Close()
+	return resp.StatusCode, nil
+}
+
 // BearerToken returns a formatted Bearer authorization header value.
 func BearerToken(token string) string {
 	return "Bearer " + token
