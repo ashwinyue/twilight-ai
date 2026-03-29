@@ -85,10 +85,43 @@ func (p *Provider) Test(ctx context.Context) *sdk.ProviderTestResult {
 		Query:   map[string]string{"limit": "1"},
 		Headers: utils.AuthHeader(p.apiKey),
 	})
-	if err != nil {
+	if err == nil {
+		return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+	}
+
+	// Fallback: some OpenAI-compatible providers do not implement the /models
+	// endpoint. Probe via a minimal chat completion request.
+	status, probeErr := utils.ProbeStatus(ctx, p.httpClient, &utils.RequestOptions{
+		Method:  http.MethodPost,
+		BaseURL: p.baseURL,
+		Path:    "/chat/completions",
+		Headers: utils.AuthHeader(p.apiKey),
+		Body: map[string]any{
+			"messages":   []map[string]string{{"role": "user", "content": "hi"}},
+			"max_tokens": 1,
+		},
+	})
+	if probeErr != nil {
 		return classifyError(err)
 	}
-	return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok"}
+
+	switch {
+	case status >= 200 && status <= 299,
+		status == http.StatusBadRequest,
+		status == http.StatusUnprocessableEntity,
+		status == http.StatusTooManyRequests:
+		return &sdk.ProviderTestResult{Status: sdk.ProviderStatusOK, Message: "ok (probe)"}
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		return &sdk.ProviderTestResult{
+			Status:  sdk.ProviderStatusUnhealthy,
+			Message: fmt.Sprintf("authentication failed (HTTP %d)", status),
+		}
+	default:
+		return &sdk.ProviderTestResult{
+			Status:  sdk.ProviderStatusUnreachable,
+			Message: fmt.Sprintf("unexpected status %d", status),
+		}
+	}
 }
 
 func (p *Provider) TestModel(ctx context.Context, modelID string) (*sdk.ModelTestResult, error) {

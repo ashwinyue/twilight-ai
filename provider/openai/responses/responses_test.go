@@ -1379,6 +1379,53 @@ func TestProviderTest_Unhealthy(t *testing.T) {
 	}
 }
 
+func TestProviderTest_ProbeFallback_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if r.URL.Path == "/responses" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "model is required"},
+			})
+			return
+		}
+	}))
+	defer srv.Close()
+
+	p := responses.New(
+		responses.WithAPIKey("test-key"),
+		responses.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q (message: %s)", result.Status, result.Message)
+	}
+}
+
+func TestProviderTest_ProbeFallback_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "invalid api key"},
+		})
+	}))
+	defer srv.Close()
+
+	p := responses.New(
+		responses.WithAPIKey("bad-key"),
+		responses.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q (message: %s)", result.Status, result.Message)
+	}
+}
+
 func TestProviderTest_Unreachable(t *testing.T) {
 	p := responses.New(
 		responses.WithAPIKey("test-key"),

@@ -1090,7 +1090,7 @@ func TestProviderTest_OK(t *testing.T) {
 }
 
 func TestProviderTest_Unhealthy(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]any{
 			"error": map[string]any{"message": "invalid x-api-key"},
@@ -1106,6 +1106,55 @@ func TestProviderTest_Unhealthy(t *testing.T) {
 	result := p.Test(context.Background())
 	if result.Status != sdk.ProviderStatusUnhealthy {
 		t.Errorf("expected status Unhealthy, got %q", result.Status)
+	}
+}
+
+func TestProviderTest_ProbeFallback_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// /models endpoint not available (e.g. MiniMax)
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Probe via /messages succeeds (400 is treated as reachable)
+		if r.URL.Path == "/messages" {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(map[string]any{
+				"error": map[string]any{"message": "messages request incomplete"},
+			})
+			return
+		}
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("test-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q (message: %s)", result.Status, result.Message)
+	}
+}
+
+func TestProviderTest_ProbeFallback_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "invalid x-api-key"},
+		})
+	}))
+	defer srv.Close()
+
+	p := messages.New(
+		messages.WithAPIKey("bad-key"),
+		messages.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q (message: %s)", result.Status, result.Message)
 	}
 }
 

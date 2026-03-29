@@ -1149,6 +1149,50 @@ func TestProviderTest_Unhealthy(t *testing.T) {
 	}
 }
 
+func TestProviderTest_ProbeFallback_OK(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "model not found"},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("test-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusOK {
+		t.Errorf("expected status OK, got %q (message: %s)", result.Status, result.Message)
+	}
+}
+
+func TestProviderTest_ProbeFallback_AuthFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"message": "API key not valid"},
+		})
+	}))
+	defer srv.Close()
+
+	p := generativeai.New(
+		generativeai.WithAPIKey("bad-key"),
+		generativeai.WithBaseURL(srv.URL),
+	)
+
+	result := p.Test(context.Background())
+	if result.Status != sdk.ProviderStatusUnhealthy {
+		t.Errorf("expected status Unhealthy, got %q (message: %s)", result.Status, result.Message)
+	}
+}
+
 func TestProviderTest_Unreachable(t *testing.T) {
 	p := generativeai.New(
 		generativeai.WithAPIKey("test-key"),
